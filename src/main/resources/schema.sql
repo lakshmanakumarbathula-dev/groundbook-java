@@ -47,3 +47,17 @@ CREATE TABLE IF NOT EXISTS bookings (
     previous_from   TIMESTAMP WITH TIME ZONE,
     previous_to     TIMESTAMP WITH TIME ZONE
 );
+
+
+-- The append-only log of every transition. The app only inserts and reads it (EventLog has nothing else);
+-- actor_id says who did it; data holds the event's facts as JSON - ids, intervals and flags, never the club.
+CREATE TABLE IF NOT EXISTS events (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    venue_id    BIGINT                  NOT NULL REFERENCES venues (id),
+    booking_id  BIGINT                  NOT NULL REFERENCES bookings (id),
+    kind        VARCHAR(12)              NOT NULL,
+    at          TIMESTAMP WITH TIME ZONE NOT NULL,
+    actor_id    VARCHAR(20)              NOT NULL,
+    data        VARCHAR(2000)            NOT NULL
+);
+

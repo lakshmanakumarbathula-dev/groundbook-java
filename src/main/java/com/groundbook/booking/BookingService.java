@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.groundbook.config.GroundBookSettings;
 import com.groundbook.error.AlreadyCancelled;
@@ -44,6 +45,7 @@ public class BookingService {
     private final GroundService groundService;
     private final BookingRepository bookings;
     private final GroundBookSettings settings;
+    private final EventLog events;
     private final Clock clock;
 
     public BookingService(
@@ -53,6 +55,7 @@ public class BookingService {
             GroundService groundService,
             BookingRepository bookings,
             GroundBookSettings settings,
+            EventLog events,
             Clock clock) {
         this.venues = venues;
         this.grounds = grounds;
@@ -60,13 +63,15 @@ public class BookingService {
         this.groundService = groundService;
         this.bookings = bookings;
         this.settings = settings;
+        this.events = events;
         this.clock = clock;
     }
 
     /**
-     * A request is held for HOLD_HOURS from the moment it is made;
-     * its shadow must clash with no live booking on the ground.
+     * A request is held for HOLD_HOURS from the moment it is made; its shadow must clash with no live booking on the
+     * ground. The booking and its `requested` event are one transaction.
      */
+    @Transactional
     public RequestedBooking request(
             String venue, String ground, String event, Instant from, Instant to, String club) {
 
@@ -79,6 +84,15 @@ public class BookingService {
 
         long id = bookings.insert(venueId, ground, event, club, from, to, now, holdUntil);
 
+        events.append(
+                venueId,
+                id,
+                "requested",
+                now,
+                Map.of(
+                        "from", from.toString(),
+                        "to", to.toString()));
+
         return new RequestedBooking(
                 BookingIds.format(id), ground, event, from, to,
                 held.from(), held.to(), "requested", holdUntil);
@@ -88,6 +102,7 @@ public class BookingService {
      * Confirm needs a requested booking whose slot has not begun, and
      * re-runs the clash check (a competing request may have been confirmed since).
      */
+    @Transactional
     public ConfirmResponse confirm(String venue, String bookingId) {
         BookingRepository.Row b = find(venue, bookingId);
         Instant now = now();
@@ -102,11 +117,16 @@ public class BookingService {
             }
         }
 
+        long venueId = venues.idOf(venue).orElseThrow();
+
         refuseClashes(
-                venues.idOf(venue).orElseThrow(),
+                venueId,
                 b.ground(), b.from(), shadowOf(b), b.id());
 
         bookings.confirm(b.id(), now);
+
+        events.append(venueId, b.id(), "confirmed", now, Map.of());
+
         return new ConfirmResponse(bookingId, "confirmed", now);
     }
 
@@ -115,6 +135,7 @@ public class BookingService {
      * once the slot has begun the cancel is late - allowed, and flagged.
      * Nobody can book the past, so the rest of the slot needs no protecting.
      */
+    @Transactional
     public CancelResponse cancel(String venue, String bookingId) {
         BookingRepository.Row b = find(venue, bookingId);
         Instant now = now();
@@ -130,6 +151,14 @@ public class BookingService {
         boolean late = !now.isBefore(b.from());
 
         bookings.cancel(b.id(), now, late);
+
+        events.append(
+                venues.idOf(venue).orElseThrow(),
+                b.id(),
+                "cancelled",
+                now,
+                Map.of("late", late));
+
         return new CancelResponse(bookingId, "cancelled", now, late);
     }
 
@@ -137,9 +166,12 @@ public class BookingService {
         BookingRepository.Row b = find(venue, bookingId);
 
         Shadow held = shadowOf(b);
+       
         return new BookingView(
                 bookingId, b.ground(), b.event(), b.from(), b.to(),
-                held.from(), held.to(), b.state());
+                held.from(), held.to(), b.state(),
+                events.forBooking(b.id()));
+
     }
 
     /**
