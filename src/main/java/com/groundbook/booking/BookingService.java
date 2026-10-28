@@ -32,8 +32,8 @@ import com.groundbook.ground.Shadow;
 import com.groundbook.ground.VenueRepository;
 
 /**
- * Requests for slots, their transitions (confirm, cancel) and reading a booking back. Every `now` comes from the
- * injected clock; all times are UTC.
+ * Requests for slots, their transitions (confirm, cancel) and reading a booking back.
+ * Every `now` comes from the injected clock; all times are UTC.
  */
 @Service
 public class BookingService {
@@ -46,9 +46,14 @@ public class BookingService {
     private final GroundBookSettings settings;
     private final Clock clock;
 
-    public BookingService(VenueRepository venues, GroundRepository grounds, EventTypeRepository eventTypes,
-                          GroundService groundService, BookingRepository bookings, GroundBookSettings settings,
-                          Clock clock) {
+    public BookingService(
+            VenueRepository venues,
+            GroundRepository grounds,
+            EventTypeRepository eventTypes,
+            GroundService groundService,
+            BookingRepository bookings,
+            GroundBookSettings settings,
+            Clock clock) {
         this.venues = venues;
         this.grounds = grounds;
         this.eventTypes = eventTypes;
@@ -59,11 +64,13 @@ public class BookingService {
     }
 
     /**
-     * A request is held for HOLD_HOURS from the moment it is made; its shadow must clash with no live booking on the
-     * ground.
+     * A request is held for HOLD_HOURS from the moment it is made;
+     * its shadow must clash with no live booking on the ground.
      */
-    public RequestedBooking request(String venue, String ground, String event, Instant from, Instant to, String club) {
-        long venueId = venues.idOf(venue).orElseThrow(); // the one venue is seeded at start-up
+    public RequestedBooking request(
+            String venue, String ground, String event, Instant from, Instant to, String club) {
+
+        long venueId = venues.idOf(venue).orElseThrow();
         Shadow held = slot(venueId, venue, ground, event, from, to);
         refuseClashes(venueId, ground, from, held, 0);
 
@@ -72,13 +79,14 @@ public class BookingService {
 
         long id = bookings.insert(venueId, ground, event, club, from, to, now, holdUntil);
 
-        return new RequestedBooking(BookingIds.format(id), ground, event, from, to, held.from(), held.to(),
-                "requested", holdUntil);
+        return new RequestedBooking(
+                BookingIds.format(id), ground, event, from, to,
+                held.from(), held.to(), "requested", holdUntil);
     }
 
     /**
-     * Confirm needs a requested booking whose slot has not begun, and re-runs the clash check (a competing request may
-     * have been confirmed since).
+     * Confirm needs a requested booking whose slot has not begun, and
+     * re-runs the clash check (a competing request may have been confirmed since).
      */
     public ConfirmResponse confirm(String venue, String bookingId) {
         BookingRepository.Row b = find(venue, bookingId);
@@ -94,16 +102,18 @@ public class BookingService {
             }
         }
 
-        refuseClashes(venues.idOf(venue).orElseThrow(), b.ground(), b.from(), shadowOf(b), b.id());
+        refuseClashes(
+                venues.idOf(venue).orElseThrow(),
+                b.ground(), b.from(), shadowOf(b), b.id());
 
         bookings.confirm(b.id(), now);
         return new ConfirmResponse(bookingId, "confirmed", now);
     }
 
     /**
-     * Cancel needs a requested or confirmed booking whose slot has not ended; once the slot has begun the cancel is
-     * late - allowed, and flagged. Nobody can book the past, so the rest of the slot needs no
-     * protecting.
+     * Cancel needs a requested or confirmed booking whose slot has not ended;
+     * once the slot has begun the cancel is late - allowed, and flagged.
+     * Nobody can book the past, so the rest of the slot needs no protecting.
      */
     public CancelResponse cancel(String venue, String bookingId) {
         BookingRepository.Row b = find(venue, bookingId);
@@ -127,15 +137,18 @@ public class BookingService {
         BookingRepository.Row b = find(venue, bookingId);
 
         Shadow held = shadowOf(b);
-        return new BookingView(bookingId, b.ground(), b.event(), b.from(), b.to(),
+        return new BookingView(
+                bookingId, b.ground(), b.event(), b.from(), b.to(),
                 held.from(), held.to(), b.state());
     }
 
     /**
-     * A shadow may not clash with the shadow of any live booking on the same ground and date; the booking itself
-     * (id `self`, 0 for a new one) is left out.
+     * A shadow may not clash with the shadow of any live booking on the same
+     * ground and date; the booking itself (id `self`, 0 for a new one) is left out.
      */
-    private void refuseClashes(long venueId, String ground, Instant from, Shadow held, long self) {
+    public void refuseClashes(
+            long venueId, String ground, Instant from, Shadow held, long self) {
+
         Instant now = clock.instant();
 
         List<Map<String, Object>> clashes = bookings.onDay(
@@ -151,19 +164,20 @@ public class BookingService {
                     clash.put("groundHeldFrom", theirs.from().toString());
                     clash.put("groundHeldTo", theirs.to().toString());
                     return clash;
-                }).toList();
+                })
+                .toList();
 
         if (!clashes.isEmpty()) {
             throw new Overlap(clashes);
         }
     }
 
-    private Shadow shadowOf(BookingRepository.Row b) {
+    public Shadow shadowOf(BookingRepository.Row b) {
         return groundService.shadow(
                 b.from(), b.to(), b.setupMinutes(), b.teardownMinutes());
     }
 
-    private BookingRepository.Row find(String venue, String bookingId) {
+    public BookingRepository.Row find(String venue, String bookingId) {
         long venueId = venues.idOf(venue).orElseThrow();
         return BookingIds.parse(bookingId)
                 .flatMap(id -> bookings.find(venueId, id))
@@ -175,17 +189,22 @@ public class BookingService {
     }
 
     /**
-     * Checks a slot in order - the ground, the event type, `to` after `from`, 30 minutes to 12 hours, not in the past,
-     * one date, and the shadow inside that weekday's hours - and answers its shadow.
+     * Checks a slot in order - the ground, the event type, `to` after `from`,
+     * 30 minutes to 12 hours, not in the past, one date, and the shadow inside
+     * that weekday's hours - and answers its shadow.
      */
-    private Shadow slot(long venueId, String venue, String ground, String event, Instant from, Instant to) {
+    public Shadow slot(
+            long venueId, String venue, String ground, String event, Instant from, Instant to) {
+
         GroundRepository.Row g = grounds.one(venueId, ground)
                 .orElseThrow(() -> new NoSuchGround(venue, ground));
+
         EventTypeRepository.Row type = eventTypes.one(venueId, event)
                 .orElseThrow(() -> new NoSuchEventType(event));
 
         if (!to.isAfter(from)) {
-            throw new BadInterval("The slot ends at " + to + ", not after it starts at " + from);
+            throw new BadInterval(
+                    "The slot ends at " + to + ", not after it starts at " + from);
         }
 
         Duration length = Duration.between(from, to);
@@ -200,7 +219,8 @@ public class BookingService {
 
         LocalDate day = LocalDate.ofInstant(from, ZoneOffset.UTC);
         if (!day.equals(LocalDate.ofInstant(to, ZoneOffset.UTC))) {
-            throw new BadInterval("The slot runs past midnight; both ends must be on the same date");
+            throw new BadInterval(
+                    "The slot runs past midnight; both ends must be on the same date");
         }
 
         Shadow held = groundService.shadow(
@@ -209,8 +229,10 @@ public class BookingService {
 
         if (held.from().isBefore(day.atTime(hours[0]).toInstant(ZoneOffset.UTC))
                 || held.to().isAfter(day.atTime(hours[1]).toInstant(ZoneOffset.UTC))) {
-            throw new BadInterval("Ground " + ground + " would be held " + held.from() + " to " + held.to()
-                    + "; it opens at " + hours[0] + " and closes at " + hours[1], hours[0], hours[1]);
+            throw new BadInterval(
+                    "Ground " + ground + " would be held " + held.from() + " to " + held.to()
+                            + "; it opens at " + hours[0] + " and closes at " + hours[1],
+                    hours[0], hours[1]);
         }
 
         return held;

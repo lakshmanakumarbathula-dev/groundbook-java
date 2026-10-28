@@ -4,7 +4,7 @@ import java.util.Map;
 
 /**
  * A refusal the domain gives: thrown by a service, turned into a ProblemDetail once, by {@link ApiExceptionHandler}.
- * Unchecked.
+ * Unchecked, so a refusal inside a transaction rolls it back.
  */
 public abstract class DomainException extends RuntimeException {
 
@@ -31,7 +31,7 @@ public abstract class DomainException extends RuntimeException {
         return title;
     }
 
-/** Extra fields the ticket names for this refusal (none by default). */
+    /** Extra fields the ticket names for this refusal (none by default). */
     public Map<String, Object> properties() {
         return Map.of();
     }
