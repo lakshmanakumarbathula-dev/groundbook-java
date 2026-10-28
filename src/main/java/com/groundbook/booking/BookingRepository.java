@@ -15,18 +15,29 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class BookingRepository {
 
-    /** One booking, with its ground's code and its event type's code and buffers (its shadow comes from them). */
+    /**
+     * One booking, with its ground's code and its event type's code and buffers (its shadow comes from them), and how
+     * long a request holds the ground.
+     */
     public record Row(long id, String ground, String event, Instant from, Instant to, String state, int setupMinutes,
-                      int teardownMinutes) {
+            int teardownMinutes, Instant holdUntil) {
 
         public String bookingId() {
             return BookingIds.format(id);
+        }
+
+        /**
+         * Live bookings hold the ground - confirmed ones, and requested ones whose hold has not lapsed.
+         */
+        public boolean live(Instant now) {
+            return "confirmed".equals(state)
+                    || "requested".equals(state) && now.isBefore(holdUntil);
         }
     }
 
     private static final String SELECT = """
             SELECT b.id, g.code AS ground, t.code AS event, b.from_at AS "from", b.to_at AS "to", b.state,
-            t.setup_minutes, t.teardown_minutes
+            t.setup_minutes, t.teardown_minutes, b.hold_until
             FROM bookings b JOIN grounds g ON g.id = b.ground_id JOIN event_types t ON t.id = b.event_type_id
             WHERE b.venue_id = ?""";
 
@@ -38,7 +49,7 @@ public class BookingRepository {
 
     /** A new requested booking; its database id. */
     public long insert(long venueId, String ground, String event, String club, Instant from, Instant to,
-                       Instant requestedAt, Instant holdUntil) {
+            Instant requestedAt, Instant holdUntil) {
         KeyHolder key = new GeneratedKeyHolder();
         jdbc.sql("""
                         INSERT INTO bookings
@@ -51,8 +62,10 @@ public class BookingRepository {
                 .update(key, "id");
         return key.getKeyAs(Long.class);
     }
+
     public void confirm(long id, Instant at) {
-        jdbc.sql("UPDATE bookings SET state = 'confirmed', confirmed_at = ? WHERE id = ?").params(at, id).update();
+        jdbc.sql("UPDATE bookings SET state = 'confirmed', confirmed_at = ? WHERE id = ?")
+                .params(at, id).update();
     }
 
     public void cancel(long id, Instant at, boolean late) {

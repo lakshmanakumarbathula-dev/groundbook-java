@@ -7,6 +7,9 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 
@@ -21,6 +24,7 @@ import com.groundbook.error.InvalidRequest;
 import com.groundbook.error.NoSuchBooking;
 import com.groundbook.error.NoSuchEventType;
 import com.groundbook.error.NoSuchGround;
+import com.groundbook.error.Overlap;
 import com.groundbook.ground.EventTypeRepository;
 import com.groundbook.ground.GroundRepository;
 import com.groundbook.ground.GroundService;
@@ -54,10 +58,14 @@ public class BookingService {
         this.clock = clock;
     }
 
-    /** A request is held for HOLD_HOURS from the moment it is made; no overlap check yet. */
+    /**
+     * A request is held for HOLD_HOURS from the moment it is made; its shadow must clash with no live booking on the
+     * ground.
+     */
     public RequestedBooking request(String venue, String ground, String event, Instant from, Instant to, String club) {
         long venueId = venues.idOf(venue).orElseThrow(); // the one venue is seeded at start-up
         Shadow held = slot(venueId, venue, ground, event, from, to);
+        refuseClashes(venueId, ground, from, held, 0);
 
         Instant now = now();
         Instant holdUntil = now.plus(Duration.ofHours(settings.holdHours()));
@@ -68,7 +76,10 @@ public class BookingService {
                 "requested", holdUntil);
     }
 
-    /** Confirm needs a requested booking whose slot has not begun. */
+    /**
+     * Confirm needs a requested booking whose slot has not begun, and re-runs the clash check (a competing request may
+     * have been confirmed since).
+     */
     public ConfirmResponse confirm(String venue, String bookingId) {
         BookingRepository.Row b = find(venue, bookingId);
         Instant now = now();
@@ -82,6 +93,8 @@ public class BookingService {
                 }
             }
         }
+
+        refuseClashes(venues.idOf(venue).orElseThrow(), b.ground(), b.from(), shadowOf(b), b.id());
 
         bookings.confirm(b.id(), now);
         return new ConfirmResponse(bookingId, "confirmed", now);
@@ -113,10 +126,41 @@ public class BookingService {
     public BookingView booking(String venue, String bookingId) {
         BookingRepository.Row b = find(venue, bookingId);
 
-        Shadow held = groundService.shadow(
-                b.from(), b.to(), b.setupMinutes(), b.teardownMinutes());
+        Shadow held = shadowOf(b);
         return new BookingView(bookingId, b.ground(), b.event(), b.from(), b.to(),
                 held.from(), held.to(), b.state());
+    }
+
+    /**
+     * A shadow may not clash with the shadow of any live booking on the same ground and date; the booking itself
+     * (id `self`, 0 for a new one) is left out.
+     */
+    private void refuseClashes(long venueId, String ground, Instant from, Shadow held, long self) {
+        Instant now = clock.instant();
+
+        List<Map<String, Object>> clashes = bookings.onDay(
+                        venueId, ground, LocalDate.ofInstant(from, ZoneOffset.UTC))
+                .stream()
+                .filter(other -> other.id() != self
+                        && other.live(now)
+                        && held.clashes(shadowOf(other)))
+                .map(other -> {
+                    Shadow theirs = shadowOf(other);
+                    Map<String, Object> clash = new LinkedHashMap<>();
+                    clash.put("bookingId", other.bookingId());
+                    clash.put("groundHeldFrom", theirs.from().toString());
+                    clash.put("groundHeldTo", theirs.to().toString());
+                    return clash;
+                }).toList();
+
+        if (!clashes.isEmpty()) {
+            throw new Overlap(clashes);
+        }
+    }
+
+    private Shadow shadowOf(BookingRepository.Row b) {
+        return groundService.shadow(
+                b.from(), b.to(), b.setupMinutes(), b.teardownMinutes());
     }
 
     private BookingRepository.Row find(String venue, String bookingId) {
