@@ -26,8 +26,9 @@ CREATE TABLE IF NOT EXISTS event_types (
     teardown_minutes INT NOT NULL,
     UNIQUE (venue_id, code)
 );
-
 -- A club's request for a slot. Its shadow is derived on read.
+-- name is kept and never sent back. Confirmed_at, cancelled_at, and late_cancel when it was cancelled after its
+-- slot began.
 CREATE TABLE IF NOT EXISTS bookings (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     venue_id BIGINT NOT NULL REFERENCES venues (id),
@@ -38,5 +39,8 @@ CREATE TABLE IF NOT EXISTS bookings (
     to_at TIMESTAMP WITH TIME ZONE NOT NULL,
     state VARCHAR(10) NOT NULL,
     requested_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    hold_until TIMESTAMP WITH TIME ZONE NOT NULL
+    hold_until      TIMESTAMP WITH TIME ZONE NOT NULL,
+    confirmed_at    TIMESTAMP WITH TIME ZONE,
+    cancelled_at    TIMESTAMP WITH TIME ZONE,
+    late_cancel     BOOLEAN                  NOT NULL DEFAULT FALSE
 );
