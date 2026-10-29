@@ -13,4 +13,5 @@ server:
 
 groundbook:
   seed-dir: seed
-  hold-hours: 24
+  hold-hours: ${HOLD_HOURS:24}
+

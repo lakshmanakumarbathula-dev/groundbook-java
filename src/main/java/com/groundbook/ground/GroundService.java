@@ -7,6 +7,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 
@@ -26,8 +29,12 @@ public class GroundService {
     private final BookingRepository bookings;
     private final Clock clock;
 
-    public GroundService(VenueRepository venues, GroundRepository grounds, EventTypeRepository eventTypes,
-                        BookingRepository bookings, Clock clock) {
+    public GroundService(
+            VenueRepository venues,
+            GroundRepository grounds,
+            EventTypeRepository eventTypes,
+            BookingRepository bookings,
+            Clock clock) {
         this.venues = venues;
         this.grounds = grounds;
         this.eventTypes = eventTypes;
@@ -37,14 +44,24 @@ public class GroundService {
 
     public GroundsView grounds(String venue) {
         return new GroundsView(venue, grounds.all(venueId(venue)).stream()
-                .map(g -> new GroundView(g.code(), g.name(), g.opens(), g.closes(), g.sundayOpens(),
-                        g.sundayCloses()))
+                .map(g -> new GroundView(
+                        g.code(), g.name(), g.opens(), g.closes(), g.sundayOpens(), g.sundayCloses()))
                 .toList());
     }
 
     public EventTypesView eventTypes(String venue) {
         return new EventTypesView(eventTypes.all(venueId(venue)).stream()
-                .map(t -> new EventTypeView(t.code(), t.name(), t.setupMinutes(), t.teardownMinutes())).toList());
+                .map(t -> new EventTypeView(
+                        t.code(), t.name(), t.setupMinutes(), t.teardownMinutes()))
+                .toList());
+    }
+
+    /** Every event type's buffers, [setup, teardown] minutes, straight from the event_types rows. */
+    public Map<String, List<Integer>> buffers(String venue) {
+        Map<String, List<Integer>> buffers = new LinkedHashMap<>();
+        eventTypes.all(venueId(venue))
+                .forEach(t -> buffers.put(t.code(), List.of(t.setupMinutes(), t.teardownMinutes())));
+        return buffers;
     }
 
     /**
@@ -56,10 +73,13 @@ public class GroundService {
         GroundRepository.Row row = grounds.one(venueId, ground)
                 .orElseThrow(() -> new NoSuchGround(venue, ground));
 
-        LocalDate day = date != null ? date : LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
+        LocalDate day = date != null
+                ? date
+                : LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
         LocalTime[] hours = hours(row, day);
 
-        return new DayView(venue, ground, day, hours[0], hours[1],
+        return new DayView(
+                venue, ground, day, hours[0], hours[1],
                 bookings.onDay(venueId, ground, day).stream()
                         .map(b -> {
                             Shadow held = shadow(
